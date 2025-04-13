@@ -46,12 +46,15 @@ try {
     $items = [];
     
     while ($row = $result->fetch_assoc()) {
+        // Ensure price is properly formatted as a float with 2 decimal places
+        $price = number_format((float)$row['price'], 2, '.', '');
+        
         $items[] = [
             'id' => $row['id'],
             'product_id' => $row['product_id'],
             'name' => $row['product_name'],
-            'price' => (float)$row['price'],
-            'quantity' => (int)$row['quantity'], // Ensure integer
+            'price' => $price,
+            'quantity' => (int)$row['quantity'],
             'image' => $row['image_url'],
             'specs' => $row['specs']
         ];
@@ -61,23 +64,22 @@ try {
     // Calculate totals
     $subtotal = 0;
     foreach ($items as $item) {
-        $subtotal += $item['price'] * $item['quantity'];
+        $subtotal += (float)$item['price'] * $item['quantity'];
     }
 
     $shipping = $subtotal > 50 ? 0 : 5.99;
     $tax = $subtotal * 0.06;
     $total = $subtotal + $shipping + $tax;
 
-    // Set success response
+    // Set success response with properly formatted numbers
     $response = [
         'success' => true,
         'items' => $items,
         'summary' => [
-            // Format totals to 2 decimal places for consistency
-            'subtotal' => round($subtotal, 2),
-            'shipping' => round($shipping, 2),
-            'tax' => round($tax, 2),
-            'total' => round($total, 2)
+            'subtotal' => number_format($subtotal, 2, '.', ''),
+            'shipping' => number_format($shipping, 2, '.', ''),
+            'tax' => number_format($tax, 2, '.', ''),
+            'total' => number_format($total, 2, '.', '')
         ]
     ];
 
@@ -89,7 +91,6 @@ try {
     $response = [
         'success' => false,
         'message' => 'An error occurred while loading cart items.'
-        // 'debug_error' => $e->getMessage() // Only for debugging
     ];
 }
 
@@ -104,5 +105,5 @@ if (isset($conn) && $conn instanceof mysqli) {
     $conn->close();
 }
 
-exit; // Ensure no further processing
+exit;
 ?> 

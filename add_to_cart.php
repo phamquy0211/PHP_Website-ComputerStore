@@ -31,6 +31,9 @@ if ($product_id <= 0 || empty($product_name) || $price <= 0) {
     exit;
 }
 
+// Format price to 2 decimal places
+$price = round($price, 2);
+
 try {
     // Check database connection
     if (!$conn) {

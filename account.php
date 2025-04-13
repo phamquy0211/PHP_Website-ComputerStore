@@ -1,6 +1,9 @@
 <?php
 session_start();
 
+// Include database connection
+require_once 'db_connect.php';
+
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
     // Redirect to login page if not logged in
@@ -8,9 +11,121 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
     exit();
 }
 
-// Get user information from session
-$userFullname = isset($_SESSION['user_fullname']) ? $_SESSION['user_fullname'] : 'User';
-$userEmail = isset($_SESSION['user_email']) ? $_SESSION['user_email'] : 'user@example.com';
+// Function to get user data
+function getUserData($conn, $userId) {
+    $stmt = $conn->prepare("SELECT fullname, email, gender, phone, date_of_birth, avatar FROM users WHERE id = ?");
+    $stmt->bind_param("i", $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $userData = $result->fetch_assoc();
+    $stmt->close();
+    return $userData;
+}
+
+// Get initial user data
+$user = getUserData($conn, $_SESSION['user_id']);
+$userFullname = $user['fullname'];
+$userEmail = $user['email'];
+
+// Handle profile update
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_profile'])) {
+    $fullname = trim(htmlspecialchars($_POST['fullname']));
+    $gender = $_POST['gender'];
+    $phone = trim(htmlspecialchars($_POST['phone']));
+    $date_of_birth = $_POST['date_of_birth'];
+    
+    $profile_errors = [];
+    
+    // Handle avatar upload
+    $avatar_path = null;
+    if (isset($_FILES['avatar']) && $_FILES['avatar']['error'] == 0) {
+        $allowed = ['jpg', 'jpeg', 'png', 'gif'];
+        $filename = $_FILES['avatar']['name'];
+        $filetype = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+        
+        if (!in_array($filetype, $allowed)) {
+            $profile_errors[] = "Only JPG, JPEG, PNG & GIF files are allowed.";
+        }
+        
+        $max_size = 5 * 1024 * 1024; // 5MB
+        if ($_FILES['avatar']['size'] > $max_size) {
+            $profile_errors[] = "File size must be less than 5MB.";
+        }
+        
+        if (empty($profile_errors)) {
+            // Create uploads directory if it doesn't exist
+            $upload_dir = 'uploads/avatars/';
+            if (!file_exists($upload_dir)) {
+                mkdir($upload_dir, 0777, true);
+            }
+            
+            // Generate unique filename
+            $new_filename = uniqid('avatar_') . '.' . $filetype;
+            $avatar_path = $upload_dir . $new_filename;
+            
+            // Move uploaded file
+            if (move_uploaded_file($_FILES['avatar']['tmp_name'], $avatar_path)) {
+                // Get current avatar
+                $stmt = $conn->prepare("SELECT avatar FROM users WHERE id = ?");
+                $stmt->bind_param("i", $_SESSION['user_id']);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $current_user = $result->fetch_assoc();
+                $stmt->close();
+
+                // Delete old avatar if it exists and is not the default
+                if (!empty($current_user['avatar']) && $current_user['avatar'] != 'default-avatar.png') {
+                    $old_avatar = $upload_dir . $current_user['avatar'];
+                    if (file_exists($old_avatar)) {
+                        unlink($old_avatar);
+                    }
+                }
+                $avatar_path = $new_filename;
+            } else {
+                $profile_errors[] = "Failed to upload image.";
+                $avatar_path = null;
+            }
+        }
+    }
+    
+    // Validate other inputs
+    if (empty($fullname)) {
+        $profile_errors[] = "Full name is required";
+    }
+    
+    if (!empty($phone) && !preg_match('/^[0-9+\-() ]{10,20}$/', $phone)) {
+        $profile_errors[] = "Invalid phone number format";
+    }
+    
+    if (!empty($date_of_birth) && !strtotime($date_of_birth)) {
+        $profile_errors[] = "Invalid date of birth";
+    }
+    
+    if (empty($profile_errors)) {
+        if ($avatar_path) {
+            $stmt = $conn->prepare("UPDATE users SET fullname = ?, gender = ?, phone = ?, date_of_birth = ?, avatar = ? WHERE id = ?");
+            $stmt->bind_param("sssssi", $fullname, $gender, $phone, $date_of_birth, $avatar_path, $_SESSION['user_id']);
+        } else {
+            $stmt = $conn->prepare("UPDATE users SET fullname = ?, gender = ?, phone = ?, date_of_birth = ? WHERE id = ?");
+            $stmt->bind_param("ssssi", $fullname, $gender, $phone, $date_of_birth, $_SESSION['user_id']);
+        }
+        
+        if ($stmt->execute()) {
+            $profile_success = "Profile updated successfully!";
+            $_SESSION['user_fullname'] = $fullname;
+            
+            // Refresh user data after successful update
+            $user = getUserData($conn, $_SESSION['user_id']);
+            $userFullname = $user['fullname'];
+            $userEmail = $user['email'];
+        } else {
+            $profile_error = "Error updating profile: " . $conn->error;
+        }
+        $stmt->close();
+    } else {
+        $profile_error = implode('<br>', $profile_errors);
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -416,16 +531,11 @@ $userEmail = isset($_SESSION['user_email']) ? $_SESSION['user_email'] : 'user@ex
         border-bottom: 1px solid #e0e0e0;
       }
 
-      .user-avatar {
-        width: 80px;
-        height: 80px;
-        background-color: #e3f2fd;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 2rem;
+      .avatar-preview sidebar-avatar {
+        width: 80px !important;
+        height: 80px !important;
         margin: 0 auto 1rem;
+        border-width: 3px;
       }
 
       .user-name {
@@ -853,6 +963,332 @@ $userEmail = isset($_SESSION['user_email']) ? $_SESSION['user_email'] : 'user@ex
         justify-content: flex-end;
         gap: 1rem;
       }
+
+      /* Alert Styles */
+      .alert {
+        padding: 1rem;
+        margin-bottom: 1rem;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        opacity: 1;
+        transition: opacity 0.3s ease;
+      }
+
+      .alert-success {
+        color: #155724;
+        background-color: #d4edda;
+        border-color: #c3e6cb;
+      }
+
+      .alert-danger {
+        color: #721c24;
+        background-color: #f8d7da;
+        border-color: #f5c6cb;
+      }
+
+      .alert .close {
+        background: none;
+        border: none;
+        color: inherit;
+        font-size: 1.25rem;
+        padding: 0;
+        margin-left: 1rem;
+        opacity: 0.5;
+        cursor: pointer;
+        transition: opacity 0.15s;
+      }
+
+      .alert .close:hover {
+        opacity: 1;
+      }
+
+      /* Remove margin from alert message */
+      .alert p {
+        margin: 0;
+      }
+
+      /* Modal Footer Button Styles */
+      .modal-footer .btn-outline {
+        padding: 0.6rem 1.2rem;
+        border: 2px solid #4a6cf7;
+        background: transparent;
+        color: #4a6cf7;
+        font-weight: 600;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+
+      .modal-footer .btn-outline:hover {
+        background: #f0f3ff;
+        transform: translateY(-2px);
+      }
+
+      .modal-footer .btn-primary {
+        padding: 0.6rem 1.2rem;
+        border: 2px solid #4a6cf7;
+        background: #4a6cf7;
+        color: white;
+        font-weight: 600;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+
+      .modal-footer .btn-primary:hover {
+        background: #3a5bd9;
+        border-color: #3a5bd9;
+        transform: translateY(-2px);
+      }
+
+      /* Avatar Styles */
+      .avatar-upload {
+        position: relative;
+        max-width: 150px;
+        margin: 0 auto 2rem;
+      }
+
+      .avatar-edit {
+        position: absolute;
+        right: 5px;
+        z-index: 1;
+        top: 5px;
+      }
+
+      .avatar-edit input {
+        display: none;
+      }
+
+      .avatar-edit label {
+        display: inline-block;
+        width: 30px;
+        height: 30px;
+        margin-bottom: 0;
+        border-radius: 100%;
+        background: #4a6cf7;
+        border: 1px solid transparent;
+        box-shadow: 0px 2px 4px 0px rgba(0, 0, 0, 0.12);
+        cursor: pointer;
+        font-weight: normal;
+        transition: all 0.2s ease-in-out;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .avatar-edit label:hover {
+        background: #3a5bd9;
+      }
+
+      .avatar-edit label i {
+        color: #fff;
+        font-size: 14px;
+      }
+
+      .avatar-preview {
+        width: 150px;
+        height: 150px;
+        position: relative;
+        border-radius: 100%;
+        border: 4px solid #f8f8f8;
+        box-shadow: 0px 2px 4px 0px rgba(0, 0, 0, 0.1);
+      }
+
+      .avatar-preview > div {
+        width: 100%;
+        height: 100%;
+        border-radius: 100%;
+        background-size: cover;
+        background-repeat: no-repeat;
+        background-position: center;
+      }
+
+      /* Orders Tab Styles */
+      .orders-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 2rem;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      .orders-table th,
+      .orders-table td {
+        padding: 1rem;
+        text-align: left;
+        border-bottom: 1px solid #eee;
+      }
+
+      .orders-table th {
+        background-color: #f8f9ff;
+        font-weight: 600;
+        color: #333;
+      }
+
+      .orders-table tr:hover {
+        background-color: #f8f9ff;
+      }
+
+      .order-status {
+        padding: 0.4rem 0.8rem;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        display: inline-block;
+      }
+
+      .status-processing {
+        background-color: #e3f2fd;
+        color: #1565c0;
+      }
+
+      .status-completed {
+        background-color: #e8f5e9;
+        color: #2e7d32;
+      }
+
+      .btn-view-details {
+        padding: 0.6rem 1.2rem;
+        border-radius: 6px;
+        border: none;
+        background-color: #4f46e5;
+        color: white;
+        font-weight: 500;
+        font-size: 0.9rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .btn-view-details:hover {
+        background-color: #4338ca;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+      }
+
+      .btn-view-details:active {
+        transform: translateY(0);
+      }
+
+      .details-row {
+        background-color: #f8f9ff !important;
+      }
+
+      .order-details {
+        display: none;
+        margin: 1rem 0;
+        padding: 1.5rem;
+        background-color: #fff;
+        border-radius: 8px;
+      }
+
+      .order-details.active {
+        display: block;
+        animation: fadeIn 0.3s ease-in-out;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .order-details h4 {
+        margin: 0 0 1rem 0;
+        color: #333;
+        font-size: 1.1rem;
+      }
+
+      .details-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+        background-color: #fff;
+        padding: 1rem;
+        border-radius: 6px;
+        border: 1px solid #eee;
+      }
+
+      .detail-item {
+        padding: 0.5rem;
+      }
+
+      .detail-item strong {
+        color: #666;
+        display: block;
+        margin-bottom: 0.3rem;
+        font-size: 0.9rem;
+      }
+
+      .detail-item span {
+        color: #333;
+        font-size: 1rem;
+      }
+
+      .items-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1rem;
+        background-color: #fff;
+        border-radius: 6px;
+        overflow: hidden;
+        border: 1px solid #eee;
+      }
+
+      .items-table th,
+      .items-table td {
+        padding: 0.8rem;
+        text-align: left;
+        border-bottom: 1px solid #eee;
+      }
+
+      .items-table th {
+        background-color: #f8f9ff;
+        font-weight: 600;
+        color: #333;
+        font-size: 0.9rem;
+      }
+
+      .items-table tfoot tr:last-child {
+        font-weight: 600;
+        background-color: #f8f9ff;
+      }
+
+      .items-table tfoot td {
+        padding: 1rem 0.8rem;
+      }
+
+      @media (max-width: 768px) {
+        .orders-table {
+          font-size: 0.9rem;
+        }
+
+        .order-status {
+          padding: 0.3rem 0.6rem;
+          font-size: 0.8rem;
+        }
+
+        .details-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .items-table {
+          display: block;
+          overflow-x: auto;
+          white-space: nowrap;
+        }
+      }
     </style>
   </head>
   <body>
@@ -882,7 +1318,12 @@ $userEmail = isset($_SESSION['user_email']) ? $_SESSION['user_email'] : 'user@ex
       <div class="account-wrapper">
         <div class="account-sidebar">
           <div class="user-info">
-            <div class="user-avatar">👤</div>
+            <div class="avatar-preview sidebar-avatar">
+              <div style="background-image: url('<?php 
+                $avatar = $user['avatar'] ?? 'default-avatar.png';
+                echo 'uploads/avatars/' . htmlspecialchars($avatar);
+              ?>')"></div>
+            </div>
             <div class="user-name"><?php echo htmlspecialchars($userFullname); ?></div>
             <div class="user-email"><?php echo htmlspecialchars($userEmail); ?></div>
           </div>
@@ -1011,7 +1452,149 @@ $userEmail = isset($_SESSION['user_email']) ? $_SESSION['user_email'] : 'user@ex
           <!-- Orders Tab -->
           <div class="tab-content" id="orders">
             <h2 class="section-title">My Orders</h2>
-            <!-- Orders content here -->
+            
+            <?php
+            // Get user's orders
+            $stmt = $conn->prepare("
+                SELECT o.*, 
+                       DATE_FORMAT(o.created_at, '%M %d, %Y') as order_date
+                FROM orders o 
+                WHERE o.customer_id = ? OR o.session_id = ?
+                ORDER BY o.created_at DESC
+            ");
+            $user_id = $_SESSION['user_id'];
+            $current_session = session_id();
+            $stmt->bind_param("is", $user_id, $current_session);
+            $stmt->execute();
+            $orders = $stmt->get_result();
+            $stmt->close();
+
+            if ($orders->num_rows > 0):
+            ?>
+            <table class="orders-table">
+              <thead>
+                <tr>
+                  <th>Order Number</th>
+                  <th>Order Date</th>
+                  <th>Status</th>
+                  <th>Total Amount</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php while ($order = $orders->fetch_assoc()): ?>
+                <tr>
+                  <td><?php echo htmlspecialchars($order['order_number']); ?></td>
+                  <td><?php echo $order['order_date']; ?></td>
+                  <td>
+                    <span class="order-status status-<?php echo strtolower($order['status']); ?>">
+                      <?php echo htmlspecialchars($order['status']); ?>
+                    </span>
+                  </td>
+                  <td>$<?php echo number_format($order['total'], 2); ?></td>
+                  <td>
+                    <button class="btn-view-details" onclick="toggleOrderDetails(<?php echo $order['id']; ?>)">
+                      View Details
+                    </button>
+                  </td>
+                </tr>
+                <tr class="details-row">
+                  <td colspan="5">
+                    <div id="order-details-<?php echo $order['id']; ?>" class="order-details">
+                      <h4>Order Details</h4>
+                      <div class="details-grid">
+                        <div class="detail-item">
+                          <strong>Customer Name</strong>
+                          <span><?php echo htmlspecialchars($order['first_name'] . ' ' . $order['last_name']); ?></span>
+                        </div>
+                        <div class="detail-item">
+                          <strong>Email</strong>
+                          <span><?php echo htmlspecialchars($order['email']); ?></span>
+                        </div>
+                        <div class="detail-item">
+                          <strong>Phone</strong>
+                          <span><?php echo htmlspecialchars($order['phone']); ?></span>
+                        </div>
+                        <div class="detail-item">
+                          <strong>Payment Method</strong>
+                          <span><?php echo htmlspecialchars($order['payment_method']); ?></span>
+                        </div>
+                        <div class="detail-item">
+                          <strong>Shipping Address</strong>
+                          <span>
+                            <?php 
+                            echo htmlspecialchars($order['address']) . '<br>';
+                            echo htmlspecialchars($order['city']) . ', ' . htmlspecialchars($order['state']) . ' ' . htmlspecialchars($order['zip_code']) . '<br>';
+                            echo htmlspecialchars($order['country']);
+                            ?>
+                          </span>
+                        </div>
+                      </div>
+
+                      <?php
+                      // Get order items
+                      $stmt = $conn->prepare("
+                          SELECT * FROM order_items 
+                          WHERE order_id = ?
+                      ");
+                      $stmt->bind_param("i", $order['id']);
+                      $stmt->execute();
+                      $items = $stmt->get_result();
+                      $stmt->close();
+                      ?>
+
+                      <h4>Order Items</h4>
+                      <table class="items-table">
+                        <thead>
+                          <tr>
+                            <th>Product</th>
+                            <th>Specifications</th>
+                            <th>Price</th>
+                            <th>Quantity</th>
+                            <th>Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <?php while ($item = $items->fetch_assoc()): ?>
+                          <tr>
+                            <td><?php echo htmlspecialchars($item['product_name']); ?></td>
+                            <td><?php echo htmlspecialchars($item['specs'] ?: 'N/A'); ?></td>
+                            <td>$<?php echo number_format($item['price'], 2); ?></td>
+                            <td><?php echo $item['quantity']; ?></td>
+                            <td>$<?php echo number_format($item['price'] * $item['quantity'], 2); ?></td>
+                          </tr>
+                          <?php endwhile; ?>
+                        </tbody>
+                        <tfoot>
+                          <tr>
+                            <td colspan="4" style="text-align: right;"><strong>Subtotal:</strong></td>
+                            <td>$<?php echo number_format($order['subtotal'], 2); ?></td>
+                          </tr>
+                          <tr>
+                            <td colspan="4" style="text-align: right;"><strong>Shipping:</strong></td>
+                            <td>$<?php echo number_format($order['shipping'], 2); ?></td>
+                          </tr>
+                          <tr>
+                            <td colspan="4" style="text-align: right;"><strong>Tax:</strong></td>
+                            <td>$<?php echo number_format($order['tax'], 2); ?></td>
+                          </tr>
+                          <tr>
+                            <td colspan="4" style="text-align: right;"><strong>Total:</strong></td>
+                            <td><strong>$<?php echo number_format($order['total'], 2); ?></strong></td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+                <?php endwhile; ?>
+              </tbody>
+            </table>
+            <?php else: ?>
+            <div class="alert alert-info">
+              You haven't placed any orders yet.
+            </div>
+            <?php endif; ?>
           </div>
 
           <!-- Wishlist Tab -->
@@ -1029,13 +1612,175 @@ $userEmail = isset($_SESSION['user_email']) ? $_SESSION['user_email'] : 'user@ex
           <!-- Profile Tab -->
           <div class="tab-content" id="profile">
             <h2 class="section-title">Profile Details</h2>
-            <!-- Profile content here -->
+            <?php
+            // Get current user data including avatar
+            $stmt = $conn->prepare("SELECT fullname, email, gender, phone, date_of_birth, avatar FROM users WHERE id = ?");
+            $stmt->bind_param("i", $_SESSION['user_id']);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $user = $result->fetch_assoc();
+            $stmt->close();
+            ?>
+            
+            <?php if (isset($profile_success)): ?>
+            <div class="alert alert-success" role="alert">
+                <?php echo $profile_success; ?>
+                <button type="button" class="close" onclick="this.parentElement.style.display='none';">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <?php endif; ?>
+            
+            <?php if (isset($profile_error)): ?>
+            <div class="alert alert-danger" role="alert">
+                <?php echo $profile_error; ?>
+                <button type="button" class="close" onclick="this.parentElement.style.display='none';">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <?php endif; ?>
+            
+            <form method="post" action="" enctype="multipart/form-data">
+                <div class="avatar-upload">
+                    <div class="avatar-edit">
+                        <input type="file" id="avatar" name="avatar" accept=".png, .jpg, .jpeg, .gif">
+                        <label for="avatar">
+                            <i class="fas fa-pencil-alt"></i>
+                        </label>
+                    </div>
+                    <div class="avatar-preview">
+                        <div id="imagePreview" style="background-image: url('<?php 
+                            $avatar = $user['avatar'] ?? 'default-avatar.png';
+                            echo 'uploads/avatars/' . htmlspecialchars($avatar);
+                        ?>')"></div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="fullname">Full Name</label>
+                    <input type="text" class="form-control" id="fullname" name="fullname" value="<?php echo htmlspecialchars($user['fullname']); ?>" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" class="form-control" id="email" value="<?php echo htmlspecialchars($user['email']); ?>" readonly>
+                    <small class="form-text text-muted">Email cannot be changed</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="gender">Gender</label>
+                    <select class="form-control" id="gender" name="gender">
+                        <option value="">Select Gender</option>
+                        <option value="male" <?php echo ($user['gender'] === 'male') ? 'selected' : ''; ?>>Male</option>
+                        <option value="female" <?php echo ($user['gender'] === 'female') ? 'selected' : ''; ?>>Female</option>
+                        <option value="other" <?php echo ($user['gender'] === 'other') ? 'selected' : ''; ?>>Other</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="phone">Phone Number</label>
+                    <input type="tel" class="form-control" id="phone" name="phone" value="<?php echo htmlspecialchars($user['phone']); ?>">
+                </div>
+                
+                <div class="form-group">
+                    <label for="date_of_birth">Date of Birth</label>
+                    <input type="date" class="form-control" id="date_of_birth" name="date_of_birth" value="<?php echo $user['date_of_birth']; ?>">
+                </div>
+                
+                <button type="submit" name="update_profile" class="btn btn-primary">
+                    Save Changes
+                </button>
+            </form>
           </div>
 
           <!-- Security Tab -->
           <div class="tab-content" id="security">
             <h2 class="section-title">Security Settings</h2>
-            <!-- Security content here -->
+            <?php
+            // Handle password change
+            if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['change_password'])) {
+                $current_password = $_POST['current_password'];
+                $new_password = $_POST['new_password'];
+                $confirm_password = $_POST['confirm_password'];
+                
+                $security_errors = [];
+                
+                // Verify current password
+                $stmt = $conn->prepare("SELECT password FROM users WHERE id = ?");
+                $stmt->bind_param("i", $_SESSION['user_id']);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $user_data = $result->fetch_assoc();
+                $stmt->close();
+                
+                if (!password_verify($current_password, $user_data['password'])) {
+                    $security_errors[] = "Current password is incorrect";
+                }
+                
+                if (strlen($new_password) < 8) {
+                    $security_errors[] = "New password must be at least 8 characters long";
+                }
+                
+                if ($new_password !== $confirm_password) {
+                    $security_errors[] = "New passwords do not match";
+                }
+                
+                if (empty($security_errors)) {
+                    $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
+                    $stmt = $conn->prepare("UPDATE users SET password = ? WHERE id = ?");
+                    $stmt->bind_param("si", $hashed_password, $_SESSION['user_id']);
+                    
+                    if ($stmt->execute()) {
+                        $security_success = "Password changed successfully!";
+                    } else {
+                        $security_error = "Error changing password: " . $conn->error;
+                    }
+                    $stmt->close();
+                } else {
+                    $security_error = implode('<br>', $security_errors);
+                }
+            }
+            ?>
+            
+            <?php if (isset($security_success)): ?>
+            <div class="alert alert-success" role="alert">
+                <?php echo $security_success; ?>
+                <button type="button" class="close" onclick="this.parentElement.style.display='none';">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <?php endif; ?>
+            
+            <?php if (isset($security_error)): ?>
+            <div class="alert alert-danger" role="alert">
+                <?php echo $security_error; ?>
+                <button type="button" class="close" onclick="this.parentElement.style.display='none';">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <?php endif; ?>
+            
+            <form method="post" action="">
+                <div class="form-group">
+                    <label for="current_password">Current Password</label>
+                    <input type="password" class="form-control" id="current_password" name="current_password" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="new_password">New Password</label>
+                    <input type="password" class="form-control" id="new_password" name="new_password" required>
+                    <small class="form-text text-muted">Password must be at least 8 characters long</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="confirm_password">Confirm New Password</label>
+                    <input type="password" class="form-control" id="confirm_password" name="confirm_password" required>
+                </div>
+                
+                <button type="submit" name="change_password" class="btn btn-primary">
+                    Save Changes
+                </button>
+            </form>
           </div>
         </div>
       </div>
@@ -1108,32 +1853,38 @@ $userEmail = isset($_SESSION['user_email']) ? $_SESSION['user_email'] : 'user@ex
         const notificationIcon = document.getElementById("notification-icon");
         const notificationPanel = document.getElementById("notification-panel");
 
-        notificationIcon.addEventListener("click", function () {
-          notificationPanel.classList.toggle("active");
-          overlay.classList.toggle("active");
+        if (notificationIcon && notificationPanel) {
+          notificationIcon.addEventListener("click", function () {
+            notificationPanel.classList.toggle("active");
+            overlay.classList.toggle("active");
 
-          // Hide logout modal when notification panel is opened
-          logoutModal.classList.remove("active");
-        });
+            // Hide logout modal when notification panel is opened
+            logoutModal.classList.remove("active");
+          });
+        }
 
         // Close all modals when overlay is clicked
         overlay.addEventListener("click", function () {
-          notificationPanel.classList.remove("active");
+          if (notificationPanel) {
+            notificationPanel.classList.remove("active");
+          }
           logoutModal.classList.remove("active");
           overlay.classList.remove("active");
         });
 
         // Mark all notifications as read
         const markAllReadBtn = document.getElementById("mark-all-read");
-        markAllReadBtn.addEventListener("click", function () {
-          const unreadNotifications = document.querySelectorAll(
-            ".notification-item.unread"
-          );
-          unreadNotifications.forEach((notification) => {
-            notification.classList.remove("unread");
+        if (markAllReadBtn) {
+          markAllReadBtn.addEventListener("click", function () {
+            const unreadNotifications = document.querySelectorAll(
+              ".notification-item.unread"
+            );
+            unreadNotifications.forEach((notification) => {
+              notification.classList.remove("unread");
+            });
+            document.querySelector(".notification-count").textContent = "0";
           });
-          document.querySelector(".notification-count").textContent = "0";
-        });
+        }
 
         // Delete notification
         const deleteButtons = document.querySelectorAll(".notification-delete");
@@ -1159,6 +1910,72 @@ $userEmail = isset($_SESSION['user_email']) ? $_SESSION['user_email'] : 'user@ex
             ".notification-item.unread"
           ).length;
           document.querySelector(".notification-count").textContent = unreadCount;
+        }
+
+        // Auto-hide alerts after 10 seconds
+        function setupAutoHideAlerts() {
+          const alerts = document.querySelectorAll('.alert');
+          alerts.forEach(alert => {
+            setTimeout(() => {
+              if (alert && alert.style.display !== 'none') {
+                alert.style.display = 'none';
+              }
+            }, 10000); // 10 seconds
+          });
+        }
+
+        // Call setupAutoHideAlerts when the page loads
+        setupAutoHideAlerts();
+
+        // Add fade out animation for alerts
+        const closeButtons = document.querySelectorAll('.alert .close');
+        closeButtons.forEach(button => {
+          button.addEventListener('click', function() {
+            const alert = this.parentElement;
+            alert.style.opacity = '0';
+            setTimeout(() => {
+              alert.style.display = 'none';
+            }, 300);
+          });
+        });
+
+        // Avatar preview functionality
+        function readURL(input) {
+          if (input.files && input.files[0]) {
+            var reader = new FileReader();
+            reader.onload = function(e) {
+              document.getElementById('imagePreview').style.backgroundImage = 'url(' + e.target.result + ')';
+            }
+            reader.readAsDataURL(input.files[0]);
+          }
+        }
+        
+        document.getElementById('avatar').addEventListener('change', function() {
+          readURL(this);
+        });
+
+        // Add this to your existing JavaScript
+        function toggleOrderDetails(orderId) {
+          const detailsDiv = document.getElementById(`order-details-${orderId}`);
+          const allDetails = document.querySelectorAll('.order-details');
+          const button = event.currentTarget;
+          
+          // Close all other open details
+          allDetails.forEach(detail => {
+            if (detail.id !== `order-details-${orderId}`) {
+              detail.classList.remove('active');
+              const otherButton = detail.parentElement.parentElement.previousElementSibling.querySelector('.btn-view-details');
+              if (otherButton) {
+                otherButton.textContent = 'View Details';
+              }
+            }
+          });
+          
+          // Toggle the clicked details
+          detailsDiv.classList.toggle('active');
+          
+          // Update button text
+          button.textContent = detailsDiv.classList.contains('active') ? 'Hide Details' : 'View Details';
         }
       });
     </script>

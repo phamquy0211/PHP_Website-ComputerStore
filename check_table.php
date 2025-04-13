@@ -27,6 +27,27 @@ if ($result->num_rows > 0) {
     } else {
         echo "Role column already exists.";
     }
+
+    // Check and add new profile columns if they don't exist
+    $columns_to_add = [
+        'gender' => "ALTER TABLE users ADD COLUMN gender ENUM('male', 'female', 'other') DEFAULT NULL",
+        'phone' => "ALTER TABLE users ADD COLUMN phone VARCHAR(20) DEFAULT NULL",
+        'date_of_birth' => "ALTER TABLE users ADD COLUMN date_of_birth DATE DEFAULT NULL",
+        'avatar' => "ALTER TABLE users ADD COLUMN avatar VARCHAR(255) DEFAULT 'default-avatar.png'"
+    ];
+
+    foreach ($columns_to_add as $column => $sql) {
+        $result = $conn->query("SHOW COLUMNS FROM users LIKE '$column'");
+        if ($result->num_rows == 0) {
+            if ($conn->query($sql) === TRUE) {
+                echo "$column column added successfully!<br>";
+            } else {
+                echo "Error adding $column column: " . $conn->error . "<br>";
+            }
+        } else {
+            echo "$column column already exists.<br>";
+        }
+    }
 } else {
     echo "The 'users' table does not exist!<br>";
     

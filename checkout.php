@@ -516,55 +516,65 @@
           });
 
           if (isValid) {
+            // Disable the button to prevent double submission
+            placeOrderBtn.disabled = true;
+            placeOrderBtn.textContent = "Processing...";
+
             // Collect form data
-            const formData = {
-              firstname: document.getElementById("firstname").value,
-              lastname: document.getElementById("lastname").value,
-              email: document.getElementById("email").value,
-              phone: document.getElementById("phone").value,
-              address: document.getElementById("address").value,
-              city: document.getElementById("city").value,
-              state: document.getElementById("state").value,
-              country: document.getElementById("country").value,
-              payment_method: "credit_card", // Default payment method
-            };
+            const formData = new FormData();
+            formData.append("firstname", document.getElementById("firstname").value);
+            formData.append("lastname", document.getElementById("lastname").value);
+            formData.append("email", document.getElementById("email").value);
+            formData.append("phone", document.getElementById("phone").value);
+            formData.append("address", document.getElementById("address").value);
+            formData.append("city", document.getElementById("city").value);
+            formData.append("state", document.getElementById("state").value);
+            formData.append("country", document.getElementById("country").value);
+            formData.append("zip_code", document.getElementById("zip_code")?.value || '');
+            formData.append("payment_method", "Credit card");
 
             // Send data to server
             fetch("process_checkout.php", {
               method: "POST",
-              headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-              },
-              body: new URLSearchParams(formData),
+              body: formData
             })
-              .then((response) => {
-                if (!response.ok) {
-                  throw new Error("Network response was not ok");
-                }
-                return response.json();
-              })
-              .then((data) => {
-                if (data.success) {
-                  alert(data.message);
-                  // Clear cart after successful order
-                  localStorage.removeItem("techHubCart");
-                  // Redirect to order confirmation page
-                  window.location.href =
-                    "orderConfirm.php?order_id=" + data.order_id;
-                } else {
-                  alert("Error: " + data.message);
-                }
-              })
-              .catch((error) => {
-                console.error("Error:", error);
-                alert(
-                  "An error occurred while processing your order. Please try again."
-                );
-              });
+            .then(response => {
+              if (!response.ok) {
+                throw new Error('Network response was not ok');
+              }
+              return response.json();
+            })
+            .then(data => {
+              if (data.success) {
+                // Clear cart
+                localStorage.removeItem("techHubCart");
+                
+                // Show success message
+                alert("Order placed successfully! Redirecting to confirmation page...");
+                
+                // Redirect to order confirmation
+                window.location.href = "orderConfirm.php?order_id=" + data.order_id;
+              } else {
+                // Re-enable the button
+                placeOrderBtn.disabled = false;
+                placeOrderBtn.textContent = "Place Order";
+                
+                // Show error message
+                alert(data.message || "Error processing order. Please try again.");
+              }
+            })
+            .catch(error => {
+              console.error("Error:", error);
+              
+              // Re-enable the button
+              placeOrderBtn.disabled = false;
+              placeOrderBtn.textContent = "Place Order";
+              
+              // Show error message
+              alert("An error occurred while processing your order. Please try again.");
+            });
           } else {
-            alert(
-              "Please fill in all required fields before placing your order."
-            );
+            alert("Please fill in all required fields before placing your order.");
           }
         });
 

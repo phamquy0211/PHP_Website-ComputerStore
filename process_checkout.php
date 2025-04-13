@@ -4,6 +4,12 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// Store session_id right after starting the session
+$current_session_id = session_id();
+if (empty($current_session_id)) {
+    throw new Exception("Invalid session. Please try again.");
+}
+
 // Ensure no direct output
 ob_start();
 
@@ -26,12 +32,12 @@ try {
 
     // Function to generate unique order number
     function generateOrderNumber() {
-        return 'ORD' . time() . mt_rand(1000, 9999);
+        return 'ORD' . str_pad(mt_rand(1, 9999999999), 10, '0', STR_PAD_LEFT);
     }
 
     // Function to get cart items from database
     function getCartItems($conn) {
-        $session_id = session_id();
+        global $current_session_id; // Add this line to use the global session ID
         
         $sql = "SELECT * FROM cart_items WHERE session_id = ?";
         $stmt = $conn->prepare($sql);
@@ -39,7 +45,7 @@ try {
             throw new Exception("Error preparing statement (getCartItems): " . $conn->error);
         }
         
-        $stmt->bind_param("s", $session_id);
+        $stmt->bind_param("s", $current_session_id);
         if (!$stmt->execute()) {
             throw new Exception("Error executing statement (getCartItems): " . $stmt->error);
         }
@@ -86,6 +92,9 @@ try {
         throw new Exception('Invalid request method');
     }
 
+    // Log the received POST data for debugging
+    error_log("Received POST data: " . print_r($_POST, true));
+
     // Validate required fields
     $required_fields = ['firstname', 'lastname', 'email', 'phone', 'address', 'city', 'state', 'country'];
     $missing_fields = [];
@@ -115,6 +124,9 @@ try {
     // Get cart items from database
     $cartItems = getCartItems($conn);
     
+    // Debug log cart items
+    error_log("Cart Items: " . print_r($cartItems, true));
+    
     if (empty($cartItems)) {
         throw new Exception('Your cart is empty. Cannot place order.');
     }
@@ -122,123 +134,265 @@ try {
     // Calculate totals using the function
     $totals = calculateOrderTotals($cartItems);
     
-    // Begin transaction
-    if (!$conn->begin_transaction()) {
-         throw new Exception("Failed to begin transaction: " . $conn->error);
+    // Start transaction for the entire checkout process
+    $conn->begin_transaction();
+    
+    // Validate data lengths and formats
+    $validation_errors = [];
+    
+    // Validate personal information
+    if (strlen($first_name) > 100) $validation_errors[] = "First name is too long (maximum 100 characters)";
+    if (strlen($last_name) > 100) $validation_errors[] = "Last name is too long (maximum 100 characters)";
+    if (strlen($email) > 100) $validation_errors[] = "Email is too long (maximum 100 characters)";
+    if (strlen($phone) > 20) $validation_errors[] = "Phone number is too long (maximum 20 characters)";
+    
+    // Validate address information
+    if (strlen($address) > 255) $validation_errors[] = "Address is too long (maximum 255 characters)";
+    if (strlen($city) > 100) $validation_errors[] = "City name is too long (maximum 100 characters)";
+    if (strlen($state) > 100) $validation_errors[] = "State name is too long (maximum 100 characters)";
+    if (strlen($country) > 100) $validation_errors[] = "Country name is too long (maximum 100 characters)";
+    
+    // Validate cart and totals
+    if ($totals['subtotal'] < 0) $validation_errors[] = "Invalid subtotal amount";
+    if ($totals['shipping'] < 0) $validation_errors[] = "Invalid shipping amount";
+    if ($totals['tax'] < 0) $validation_errors[] = "Invalid tax amount";
+    if ($totals['total'] < 0) $validation_errors[] = "Invalid total amount";
+    
+    // Check product availability and validate quantities
+    $unavailable_products = [];
+    foreach ($cartItems as $item) {
+        // Validate product exists and check price
+        $stmt = $conn->prepare("SELECT id, regular_price FROM products WHERE id = ?");
+        $stmt->bind_param("i", $item['product_id']);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows === 0) {
+            $unavailable_products[] = "Product '{$item['product_name']}' is no longer available";
+        } else {
+            $product = $result->fetch_assoc();
+            
+            // Verify price hasn't changed
+            if (abs($product['regular_price'] - $item['price']) > 0.01) { // Using 0.01 for floating point comparison
+                $validation_errors[] = "Price for '{$item['product_name']}' has changed. Please refresh your cart.";
+            }
+        }
     }
     
-    try {
-        // Generate unique order number
-        $order_number = generateOrderNumber();
+    // If we have any validation errors, throw them
+    if (!empty($validation_errors) || !empty($unavailable_products)) {
+        throw new Exception(implode("\n", array_merge($validation_errors, $unavailable_products)));
+    }
 
-        // Insert order
-        $stmt_order = $conn->prepare("INSERT INTO orders (
-            order_number, session_id, first_name, last_name, email, phone, address, city, state, country,
-            zip_code, order_notes, subtotal, shipping, tax, total, status, payment_method
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)");
+    // Backup cart items in case we need to restore them
+    $cart_backup = $cartItems;
+
+    // Process customer creation/update
+    $customer_id = null;
+    
+    // First, check if the email exists in customers table
+    $stmt = $conn->prepare("SELECT id FROM customers WHERE email = ? LIMIT 1");
+    if (!$stmt) {
+        throw new Exception("Database error: " . $conn->error);
+    }
+    
+    $stmt->bind_param("s", $email);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        // Customer exists - update their information
+        $row = $result->fetch_assoc();
+        $customer_id = $row['id'];
         
-        if (!$stmt_order) {
-            throw new Exception("Error preparing order statement: " . $conn->error);
+        $stmt = $conn->prepare("UPDATE customers SET 
+            first_name = ?, 
+            last_name = ?, 
+            phone = ?,
+            address = ?,
+            city = ?,
+            state = ?,
+            country = ?
+            WHERE id = ?");
+        
+        if (!$stmt) {
+            throw new Exception("Error preparing customer update: " . $conn->error);
         }
         
-        $session_id = session_id();
-        
-        // Bind parameters
-        $stmt_order->bind_param("ssssssssssssdddss", 
-            $order_number,
-            $session_id,
-            $first_name, $last_name, $email, $phone, $address, $city, $state, $country,
-            $zip_code, $order_notes,
-            $totals['subtotal'], $totals['shipping'], $totals['tax'], $totals['total'],
-            $payment_method
+        $stmt->bind_param("sssssssi", 
+            $first_name, 
+            $last_name, 
+            $phone,
+            $address,
+            $city,
+            $state,
+            $country,
+            $customer_id
         );
         
-        if (!$stmt_order->execute()) {
-            throw new Exception("Error executing order statement: " . $stmt_order->error);
+        if (!$stmt->execute()) {
+            throw new Exception("Could not update customer: " . $stmt->error);
+        }
+    } else {
+        // Create new customer
+        $stmt = $conn->prepare("INSERT INTO customers (
+            first_name, 
+            last_name, 
+            email, 
+            phone,
+            address,
+            city,
+            state,
+            country
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        
+        if (!$stmt) {
+            throw new Exception("Error preparing customer insert: " . $conn->error);
         }
         
-        $order_id = $conn->insert_id;
-        $stmt_order->close();
+        $stmt->bind_param("ssssssss", 
+            $first_name, 
+            $last_name, 
+            $email, 
+            $phone,
+            $address,
+            $city,
+            $state,
+            $country
+        );
         
-        if ($order_id <= 0) {
-             throw new Exception("Failed to get a valid Order ID after insertion.");
+        if (!$stmt->execute()) {
+            throw new Exception("Could not create customer: " . $stmt->error);
         }
+        $customer_id = $stmt->insert_id;
+    }
 
-        // Insert order items
-        $stmt_items = $conn->prepare("INSERT INTO order_items (
+    // Create the order
+    $order_number = generateOrderNumber();
+    // Use the stored session ID instead
+    $status = 'Processing';
+    
+    // Insert the order
+    $stmt = $conn->prepare("INSERT INTO orders (
+        order_number, customer_id, session_id, first_name, last_name, 
+        email, phone, address, city, state, country, zip_code, 
+        order_notes, subtotal, shipping, tax, total, status, payment_method
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    
+    if (!$stmt) {
+        throw new Exception("Error preparing order statement: " . $conn->error);
+    }
+    
+    $stmt->bind_param("sisssssssssssddddss",
+        $order_number,
+        $customer_id,
+        $current_session_id,  // Use the stored session ID
+        $first_name, $last_name, $email, $phone,
+        $address, $city, $state, $country, $zip_code,
+        $order_notes,
+        $totals['subtotal'], $totals['shipping'], $totals['tax'], $totals['total'],
+        $status,
+        $payment_method
+    );
+    
+    if (!$stmt->execute()) {
+        throw new Exception("Could not create order: " . $stmt->error);
+    }
+    
+    $order_id = $stmt->insert_id;
+    
+    // Insert order items (without stock updates for now)
+    foreach ($cartItems as $item) {
+        // Insert order item
+        $stmt = $conn->prepare("INSERT INTO order_items (
             order_id, product_id, product_name, price, quantity, specs
         ) VALUES (?, ?, ?, ?, ?, ?)");
         
-        if (!$stmt_items) {
-            throw new Exception("Error preparing order items statement: " . $conn->error);
-        }
+        $stmt->bind_param("iisdis",
+            $order_id,
+            $item['product_id'],
+            $item['product_name'],
+            $item['price'],
+            $item['quantity'],
+            $item['specs']
+        );
         
-        foreach ($cartItems as $item) {
-            $product_id = (int)$item['product_id'];
-            $product_name = trim($item['product_name']);
-            $price = (float)$item['price'];
-            $quantity = (int)$item['quantity'];
-            $specs = $item['specs'];
-
-            $stmt_items->bind_param("iisdis", 
-                $order_id,
-                $product_id, 
-                $product_name, 
-                $price, 
-                $quantity,
-                $specs
-            );
-            
-            if (!$stmt_items->execute()) {
-                throw new Exception("Error executing order items statement for product ID {$product_id}: " . $stmt_items->error);
-            }
+        if (!$stmt->execute()) {
+            throw new Exception("Could not create order item: " . $stmt->error);
         }
-        $stmt_items->close();
-        
-        // Clear cart items from database for this session
-        $stmt_delete = $conn->prepare("DELETE FROM cart_items WHERE session_id = ?");
-        if (!$stmt_delete) {
-            throw new Exception("Error preparing delete cart statement: " . $conn->error);
-        }
-        
-        $stmt_delete->bind_param("s", $session_id);
-        if (!$stmt_delete->execute()) {
-            throw new Exception("Error executing delete cart statement: " . $stmt_delete->error);
-        }
-        $stmt_delete->close();
-        
-        // Commit transaction
-        if (!$conn->commit()) {
-            throw new Exception("Failed to commit transaction: " . $conn->error);
-        }
-        
-        // Set success response
-        $response = [
-            'success' => true,
-            'order_id' => $order_id,
-            'order_number' => $order_number,
-            'message' => 'Order placed successfully!'
-        ];
-        
-    } catch (Exception $e) {
-        // Rollback transaction on error
-        if ($conn && $conn->ping()) { 
-             $conn->rollback();
-        }
-        throw $e;
     }
     
+    // Clear the cart
+    $stmt = $conn->prepare("DELETE FROM cart_items WHERE session_id = ?");
+    if (!$stmt) {
+        throw new Exception("Error preparing cart clear statement: " . $conn->error);
+    }
+    
+    $stmt->bind_param("s", $current_session_id);  // Use the stored session ID
+    
+    if (!$stmt->execute()) {
+        throw new Exception("Could not clear cart: " . $stmt->error);
+    }
+    
+    // If we get here, everything worked! Commit the transaction
+    $conn->commit();
+    
+    // Return success response
+    $response = [
+        'success' => true,
+        'order_id' => $order_id,
+        'order_number' => $order_number,
+        'message' => 'Order placed successfully'
+    ];
+
 } catch (Exception $e) {
-    error_log("Error in process_checkout.php: " . $e->getMessage());
+    // Rollback transaction on any error
+    if (isset($conn) && $conn instanceof mysqli) {
+        $conn->rollback();
+    }
+    
+    // Log the detailed error
+    error_log("Checkout Error: " . $e->getMessage());
+    error_log("Error trace: " . $e->getTraceAsString());
+    
+    // If we have a cart backup and the error wasn't during cart clearing
+    if (isset($cart_backup) && strpos($e->getMessage(), "Could not clear cart") === false) {
+        // Restore cart items
+        foreach ($cart_backup as $item) {
+            $stmt = $conn->prepare("INSERT INTO cart_items (
+                session_id, product_id, product_name, price, quantity, image_url, specs
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            
+            $stmt->bind_param("sisdiss",
+                $current_session_id,  // Use the stored session ID
+                $item['product_id'],
+                $item['product_name'],
+                $item['price'],
+                $item['quantity'],
+                $item['image_url'],
+                $item['specs']
+            );
+            
+            $stmt->execute();
+        }
+    }
     
     $response = [
         'success' => false,
-        'message' => "Error processing order: " . $e->getMessage()
+        'message' => "Error details: " . $e->getMessage(),
+        'debug_info' => [
+            'error_type' => get_class($e),
+            'file' => $e->getFile(),
+            'line' => $e->getLine()
+        ]
     ];
 }
 
 // Clean the output buffer before sending JSON
 ob_end_clean();
+
+// Log the response being sent
+error_log("Sending response: " . json_encode($response));
 
 // Send the JSON response
 echo json_encode($response);

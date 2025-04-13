@@ -1,3 +1,45 @@
+<?php
+session_start();
+require_once 'db_connect.php';
+
+// Check if order_id is provided
+if (!isset($_GET['order_id'])) {
+    header('Location: index.php');
+    exit();
+}
+
+$order_id = (int)$_GET['order_id'];
+
+// Get order details
+$stmt = $conn->prepare("
+    SELECT o.*, DATE_FORMAT(o.created_at, '%M %d, %Y') as formatted_date
+    FROM orders o 
+    WHERE o.id = ? AND (o.customer_id = ? OR o.session_id = ?)
+");
+
+$user_id = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : null;
+$session_id = session_id();
+$stmt->bind_param("iis", $order_id, $user_id, $session_id);
+$stmt->execute();
+$order = $stmt->get_result()->fetch_assoc();
+$stmt->close();
+
+// If order not found or doesn't belong to current user/session, redirect
+if (!$order) {
+    header('Location: index.php');
+    exit();
+}
+
+// Get order items
+$stmt = $conn->prepare("
+    SELECT * FROM order_items 
+    WHERE order_id = ?
+");
+$stmt->bind_param("i", $order_id);
+$stmt->execute();
+$items = $stmt->get_result();
+$stmt->close();
+?>
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -8,319 +50,354 @@
     <link rel="stylesheet" href="style.css" />
     <style>
       .confirmation-container {
-        max-width: 800px;
-        margin: 50px auto;
-        padding: 30px 40px;
-        background-color: #fff;
-        border-radius: 8px;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        max-width: 1000px;
+        margin: 3rem auto;
+        padding: 2.5rem;
+        background-color: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      }
+
+      .confirmation-header {
         text-align: center;
+        margin-bottom: 3rem;
+        padding-bottom: 2rem;
+        border-bottom: 2px solid #f0f3ff;
       }
 
       .confirmation-icon {
-        font-size: 5em;
-        color: #27ae60;
-        margin-bottom: 20px;
+        text-align: center;
+        margin-bottom: 1.5rem;
+      }
+
+      .confirmation-icon i {
+        font-size: 5rem;
+        color: #22c55e;
+        animation: scaleIn 0.5s ease-out;
+      }
+
+      @keyframes scaleIn {
+        0% { transform: scale(0); opacity: 0; }
+        100% { transform: scale(1); opacity: 1; }
       }
 
       .confirmation-title {
-        font-size: 2em;
-        color: #333;
-        margin-bottom: 15px;
-        font-weight: 600;
+        color: #1e293b;
+        font-size: 2.2rem;
+        margin-bottom: 1rem;
+        font-weight: 700;
       }
 
       .confirmation-message {
-        font-size: 1.1em;
-        color: #555;
-        margin-bottom: 30px;
+        color: #64748b;
+        font-size: 1.1rem;
         line-height: 1.6;
       }
-      .confirmation-message strong {
-        color: #333;
+
+      .order-details {
+        background-color: #f8fafc;
+        border-radius: 10px;
+        padding: 2rem;
+        margin-bottom: 2.5rem;
       }
 
-      .order-details-box {
-        text-align: left;
-        margin: 30px 0;
-        padding: 25px;
-        background-color: #f9fafb;
-        border: 1px solid #e5e7eb;
+      .order-details h3 {
+        color: #1e293b;
+        font-size: 1.5rem;
+        margin-bottom: 1.5rem;
+        font-weight: 600;
+      }
+
+      .details-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 2rem;
+        margin-bottom: 2rem;
+      }
+
+      .detail-item {
+        background-color: white;
+        padding: 1.2rem;
         border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
       }
 
-      .order-details-box h3 {
-        font-size: 1.4em;
-        margin-bottom: 20px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid #e5e7eb;
-        color: #1a237e;
+      .detail-item strong {
+        display: block;
+        color: #64748b;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.5rem;
       }
 
-      .order-info p,
-      .order-summary p {
-        margin: 12px 0;
-        color: #4b5563;
-        font-size: 1em;
-      }
-      .order-info strong,
-      .order-summary strong {
-        color: #1f2937;
-        min-width: 120px;
-        display: inline-block;
+      .detail-item span {
+        color: #1e293b;
+        font-size: 1.1rem;
+        line-height: 1.5;
       }
 
-      .order-items-list {
-        margin-top: 20px;
-        padding-top: 20px;
-        border-top: 1px solid #e5e7eb;
+      .items-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        margin-top: 1.5rem;
+        background-color: white;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
       }
-      .order-items-list h4 {
-        font-size: 1.2em;
-        margin-bottom: 15px;
-        color: #333;
+
+      .items-table th,
+      .items-table td {
+        padding: 1.2rem;
+        text-align: left;
       }
-      .order-item {
-        display: flex;
-        gap: 15px;
-        padding: 10px 0;
-        border-bottom: 1px solid #f3f4f6;
-        align-items: center;
+
+      .items-table th {
+        background-color: #f1f5f9;
+        font-weight: 600;
+        color: #475569;
+        text-transform: uppercase;
+        font-size: 0.9rem;
+        letter-spacing: 0.5px;
       }
-      .order-item:last-child {
+
+      .items-table td {
+        border-bottom: 1px solid #e2e8f0;
+        color: #1e293b;
+      }
+
+      .items-table tbody tr:last-child td {
         border-bottom: none;
       }
-      .order-item-name {
-        flex-grow: 1;
-        font-size: 0.95em;
-        color: #374151;
-      }
-      .order-item-qty {
-        color: #6b7280;
-        font-size: 0.9em;
-        margin-left: auto;
-        padding-left: 15px;
-      }
-      .order-item-price {
-        font-weight: 600;
-        color: #1f2937;
-        min-width: 80px;
-        text-align: right;
+
+      .items-table tbody tr:hover {
+        background-color: #f8fafc;
       }
 
-      .order-summary {
-        margin-top: 20px;
-        padding-top: 20px;
-        border-top: 1px solid #e5e7eb;
+      .price-summary {
+        background-color: white;
+        border-radius: 10px;
+        padding: 1.5rem;
+        margin-top: 2rem;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
       }
-      .order-summary p {
+
+      .price-row {
         display: flex;
         justify-content: space-between;
+        padding: 0.8rem 0;
+        color: #64748b;
       }
-      .order-summary p.total {
-        font-size: 1.2em;
-        font-weight: bold;
-        color: #1a237e;
-        margin-top: 15px;
-        padding-top: 15px;
-        border-top: 1px solid #d1d5db;
+
+      .price-row.total {
+        border-top: 2px solid #e2e8f0;
+        margin-top: 0.8rem;
+        padding-top: 1.2rem;
+        color: #1e293b;
+        font-weight: 600;
+        font-size: 1.2rem;
       }
 
       .action-buttons {
-        margin-top: 40px;
         display: flex;
         justify-content: center;
-        gap: 15px;
+        gap: 1.5rem;
+        margin-top: 3rem;
       }
 
       .btn {
-        display: inline-block;
-        padding: 12px 25px;
-        border-radius: 5px;
+        padding: 1rem 2rem;
+        border-radius: 8px;
         text-decoration: none;
-        font-weight: 500;
-        transition: all 0.3s ease;
-        font-size: 1em;
-        border: 1px solid transparent;
+        font-weight: 600;
+        transition: all 0.3s;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .btn i {
+        font-size: 1.1rem;
       }
 
       .btn-primary {
-        background-color: #1a237e;
+        background-color: #4f46e5;
         color: white;
-        border-color: #1a237e;
       }
+
       .btn-primary:hover {
-        background-color: #283593;
-        border-color: #283593;
+        background-color: #4338ca;
+        transform: translateY(-2px);
       }
 
       .btn-secondary {
-        background-color: transparent;
-        color: #1a237e;
-        border-color: #1a237e;
-      }
-      .btn-secondary:hover {
-        background-color: #e8eaf6;
-        color: #1a237e;
+        background-color: #f1f5f9;
+        color: #475569;
       }
 
-      .loading-message,
-      .error-message {
-        font-size: 1.1em;
-        color: #6b7280;
-        padding: 20px;
+      .btn-secondary:hover {
+        background-color: #e2e8f0;
+        transform: translateY(-2px);
+      }
+
+      .order-status {
+        display: inline-block;
+        padding: 0.4rem 1rem;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        text-transform: capitalize;
+      }
+
+      .status-pending {
+        background-color: #fef3c7;
+        color: #92400e;
+      }
+
+      .status-processing {
+        background-color: #e0f2fe;
+        color: #075985;
+      }
+
+      .status-completed {
+        background-color: #dcfce7;
+        color: #166534;
+      }
+
+      @media (max-width: 768px) {
+        .confirmation-container {
+          margin: 1.5rem;
+          padding: 1.5rem;
+        }
+
+        .confirmation-title {
+          font-size: 1.8rem;
+        }
+
+        .details-grid {
+          grid-template-columns: 1fr;
+          gap: 1rem;
+        }
+
+        .items-table {
+          display: block;
+          overflow-x: auto;
+        }
+
+        .action-buttons {
+          flex-direction: column;
+        }
+
+        .btn {
+          width: 100%;
+          justify-content: center;
+        }
       }
     </style>
   </head>
   <body>
-    <!-- Navigation Bar -->
     <?php include "header.html"; ?>
 
-    <!-- Main Content -->
     <main class="main-content">
       <div class="confirmation-container">
-        <div class="confirmation-icon">
-          <i class="fas fa-check-circle"></i>
+        <div class="confirmation-header">
+          <div class="confirmation-icon">
+            <i class="fas fa-check-circle"></i>
+          </div>
+          <h1 class="confirmation-title">Thanks For Your Order!</h1>
+          <p class="confirmation-message">
+            Order <strong>#<?php echo htmlspecialchars($order['order_number']); ?></strong> has been successfully placed.<br>
+            We've sent a confirmation email to <strong><?php echo htmlspecialchars($order['email']); ?></strong>.
+          </p>
         </div>
-        <h1 class="confirmation-title">Order Confirmed!</h1>
-        <p class="confirmation-message">
-          Thank you for your purchase. Your order
-          <strong id="order-id-display"></strong> has been successfully placed.
-          A confirmation email has been sent to
-          <strong id="customer-email-display"></strong>.
-        </p>
 
-        <div class="order-details-box" id="order-details-content">
-          <!-- Order details will be loaded here by JavaScript -->
-          <div class="loading-message">Loading order details...</div>
+        <div class="order-details">
+          <h3>Order Information</h3>
+          <div class="details-grid">
+            <div class="detail-item">
+              <strong>Order Date</strong>
+              <span><?php echo $order['formatted_date']; ?></span>
+            </div>
+            <div class="detail-item">
+              <strong>Order Status</strong>
+              <span class="order-status status-<?php echo strtolower($order['status']); ?>">
+                <?php echo htmlspecialchars($order['status']); ?>
+              </span>
+            </div>
+            <div class="detail-item">
+              <strong>Payment Method</strong>
+              <span>
+                <i class="<?php echo $order['payment_method'] === 'Credit Card' ? 'credit-card' : 'money-bill'; ?>"></i>
+                <?php echo htmlspecialchars($order['payment_method']); ?>
+              </span>
+            </div>
+            <div class="detail-item">
+              <strong>Shipping Address</strong>
+              <span>
+                <?php 
+                echo htmlspecialchars($order['address']) . '<br>';
+                echo htmlspecialchars($order['city']) . ', ' . htmlspecialchars($order['state']) . ' ' . htmlspecialchars($order['zip_code']) . '<br>';
+                echo htmlspecialchars($order['country']);
+                ?>
+              </span>
+            </div>
+          </div>
+
+          <h3>Order Items</h3>
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Price</th>
+                <th>Quantity</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php while ($item = $items->fetch_assoc()): ?>
+              <tr>
+                <td><?php echo htmlspecialchars($item['product_name']); ?></td>
+                <td>$<?php echo number_format($item['price'], 2); ?></td>
+                <td><?php echo $item['quantity']; ?></td>
+                <td>$<?php echo number_format($item['price'] * $item['quantity'], 2); ?></td>
+              </tr>
+              <?php endwhile; ?>
+            </tbody>
+          </table>
+
+          <div class="price-summary">
+            <div class="price-row">
+              <span>Subtotal</span>
+              <span>$<?php echo number_format($order['subtotal'], 2); ?></span>
+            </div>
+            <div class="price-row">
+              <span>Shipping</span>
+              <span>$<?php echo number_format($order['shipping'], 2); ?></span>
+            </div>
+            <div class="price-row">
+              <span>Tax</span>
+              <span>$<?php echo number_format($order['tax'], 2); ?></span>
+            </div>
+            <div class="price-row total">
+              <span>Total</span>
+              <span>$<?php echo number_format($order['total'], 2); ?></span>
+            </div>
+          </div>
         </div>
 
         <div class="action-buttons">
-          <a href="index.php" class="btn btn-primary">Continue Shopping</a>
-          <a href="account.php#orders" class="btn btn-secondary"
-            >View Order History</a
-          >
-          <!-- Link to orders section in account page -->
+          <a href="index.php" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Continue Shopping
+          </a>
+          <a href="account.php" class="btn btn-primary">
+            <i class="fas fa-user"></i> View Order History
+          </a>
         </div>
       </div>
     </main>
-    <!-- Footer Section -->
+
     <?php include "footer.html"; ?>
-
-    <script>
-      document.addEventListener("DOMContentLoaded", function () {
-        const orderDetailsContainer = document.getElementById(
-          "order-details-content"
-        );
-        const orderIdDisplay = document.getElementById("order-id-display");
-        const customerEmailDisplay = document.getElementById(
-          "customer-email-display"
-        );
-
-        // Get order ID from URL query parameter
-        const urlParams = new URLSearchParams(window.location.search);
-        const orderId = urlParams.get("order_id");
-
-        if (!orderId) {
-          orderDetailsContainer.innerHTML =
-            '<div class="error-message">Error: Order ID not found in URL.</div>';
-          orderIdDisplay.textContent = "[Not Found]";
-          customerEmailDisplay.textContent = "[Unknown]";
-          return;
-        }
-
-        orderIdDisplay.textContent = `#${orderId}`;
-
-        // Fetch order details from the server
-        fetch(`get_order_details.php?order_id=${orderId}`)
-          .then((response) => {
-            if (!response.ok) {
-              throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-            return response.json();
-          })
-          .then((data) => {
-            if (data.success) {
-              displayOrderDetails(data.order, data.items);
-              customerEmailDisplay.textContent = data.order.email; // Display customer email
-            } else {
-              throw new Error(data.message || "Failed to load order details.");
-            }
-          })
-          .catch((error) => {
-            console.error("Error fetching order details:", error);
-            orderDetailsContainer.innerHTML = `<div class="error-message">Error loading order details: ${error.message}</div>`;
-            customerEmailDisplay.textContent = "[Error Loading]";
-          });
-
-        function displayOrderDetails(order, items) {
-          // Format date (optional)
-          const orderDate = new Date(order.created_at).toLocaleDateString(
-            "en-US",
-            {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            }
-          );
-
-          let itemsHtml = "";
-          items.forEach((item) => {
-            itemsHtml += `
-                        <div class="order-item">
-                            <span class="order-item-name">${
-                              item.product_name
-                            }</span>
-                            <span class="order-item-qty">Qty: ${
-                              item.quantity
-                            }</span>
-                            <span class="order-item-price">$${parseFloat(
-                              item.price
-                            ).toFixed(2)}</span>
-                </div>
-          `;
-          });
-
-          orderDetailsContainer.innerHTML = `
-                    <h3>Order Summary (#${order.id})</h3>
-                    <div class="order-info">
-                        <p><strong>Order Date:</strong> ${orderDate}</p>
-                        <p><strong>Customer:</strong> ${order.first_name} ${
-            order.last_name
-          }</p>
-                        <p><strong>Email:</strong> ${order.email}</p>
-                        <p><strong>Shipping To:</strong> ${order.address}, ${
-            order.city
-          }, ${order.state}, ${order.country} ${order.zip_code || ""}</p>
-                    </div>
-                    <div class="order-items-list">
-                        <h4>Items Purchased</h4>
-                        ${itemsHtml}
-            </div>
-            <div class="order-summary">
-                        <p><strong>Subtotal:</strong> <span>$${parseFloat(
-                          order.subtotal
-                        ).toFixed(2)}</span></p>
-                        <p><strong>Shipping:</strong> <span>$${parseFloat(
-                          order.shipping
-                        ).toFixed(2)}</span></p>
-                        <p><strong>Tax:</strong> <span>$${parseFloat(
-                          order.tax
-                        ).toFixed(2)}</span></p>
-                        <p class="total"><strong>Total:</strong> <span>$${parseFloat(
-                          order.total
-                        ).toFixed(2)}</span></p>
-          </div>
-        `;
-        }
-
-        // Basic mobile menu toggle (copy from other pages if needed)
-        const mobileToggle = document.getElementById("mobile-toggle");
-        const navLinks = document.getElementById("nav-links");
-        mobileToggle?.addEventListener("click", () => {
-          navLinks?.classList.toggle("active");
-        });
-      });
-    </script>
   </body>
 </html>

@@ -70,16 +70,22 @@ window.addToCart = function (product) {
   console.log("Adding to cart:", product);
 
   // Validate product data
-  if (!product.id || !product.name || isNaN(product.price)) {
+  if (!product.id || !product.name || !product.price) {
     console.error("Invalid product data:", product);
     return;
   }
+
+  // Ensure price is a string with 2 decimal places
+  const price =
+    typeof product.price === "string"
+      ? product.price
+      : parseFloat(product.price).toFixed(2);
 
   // Prepare data for API call
   const formData = new FormData();
   formData.append("product_id", product.id);
   formData.append("product_name", product.name);
-  formData.append("price", product.price);
+  formData.append("price", price); // Send price as string
   formData.append("image_url", product.image || "");
   formData.append("specs", product.specs || "");
   formData.append("quantity", product.quantity || 1);
@@ -214,6 +220,9 @@ window.updateCartDisplay = function () {
 
         // Add each item to the cart display
         data.items.forEach((item, index) => {
+          // Ensure price is a number
+          const price = parseFloat(item.price);
+
           const cartItemElement = document.createElement("div");
           cartItemElement.className = "cart-item";
           cartItemElement.innerHTML = `
@@ -225,7 +234,7 @@ window.updateCartDisplay = function () {
             <div class="cart-item-details">
               <div class="cart-item-title">${item.name}</div>
               <div class="cart-item-specs">${item.specs || ""}</div>
-              <div class="cart-item-price">$${item.price.toFixed(2)}</div>
+              <div class="cart-item-price">$${price.toFixed(2)}</div>
               <div class="cart-item-quantity">
                 <label for="quantity${index}">Quantity:</label>
                 <div class="quantity-controls">
@@ -250,20 +259,19 @@ window.updateCartDisplay = function () {
           cartItemsContainer.appendChild(cartItemElement);
         });
 
-        // Update summary values
-        document.getElementById(
-          "subtotal"
-        ).textContent = `$${data.summary.subtotal.toFixed(2)}`;
+        // Update summary values - ensure all values are numbers
+        const subtotal = parseFloat(data.summary.subtotal);
+        const shipping = parseFloat(data.summary.shipping);
+        const tax = parseFloat(data.summary.tax);
+        const total = parseFloat(data.summary.total);
+
+        document.getElementById("subtotal").textContent = `$${subtotal.toFixed(
+          2
+        )}`;
         document.getElementById("shipping").textContent =
-          data.summary.shipping === 0
-            ? "Free"
-            : `$${data.summary.shipping.toFixed(2)}`;
-        document.getElementById(
-          "tax"
-        ).textContent = `$${data.summary.tax.toFixed(2)}`;
-        document.getElementById(
-          "total"
-        ).textContent = `$${data.summary.total.toFixed(2)}`;
+          shipping === 0 ? "Free" : `$${shipping.toFixed(2)}`;
+        document.getElementById("tax").textContent = `$${tax.toFixed(2)}`;
+        document.getElementById("total").textContent = `$${total.toFixed(2)}`;
 
         // Add event listeners to new elements
         setupCartItemEventListeners();

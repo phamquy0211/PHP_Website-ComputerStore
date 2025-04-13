@@ -1299,36 +1299,69 @@
       });
 
       document.addEventListener("DOMContentLoaded", function () {
-        // Initialize static Add to Cart buttons
-        document
-          .querySelectorAll(".product-card .add-to-cart-btn")
-          .forEach((button, index) => {
-            button.addEventListener("click", function (e) {
-              e.preventDefault();
-              e.stopPropagation();
-
-              // Get quantity from input
-              const quantityInput = document.getElementById(
-                `quantity-${product.id}`
-              );
-              const quantity = quantityInput
-                ? parseInt(quantityInput.value) || 1
-                : 1;
-
-              // Prepare product data
-              const productData = {
-                id: product.id,
-                name: product.name,
-                price: parseFloat(product.regular_price.replace("$", "")),
-                image: product.images ? product.images[0] : "",
-                specs: product.specifications || "",
-                quantity: quantity,
-              };
-
-              // Add to cart
-              addToCart(productData);
-            });
+        document.querySelectorAll(".product-card .add-to-cart-btn").forEach((button) => {
+          button.addEventListener("click", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const productCard = this.closest(".product-card");
+            if (!productCard) return;
+            const productName = productCard.querySelector(".product-name a").textContent.trim();
+            const productId = productCard.querySelector(".product-name a").getAttribute("href").split("=")[1] || Date.now().toString();
+            const productImage = productCard.querySelector(".product-image img").src;
+            const productSpecs = productCard.querySelector(".product-category") ? 
+                                 productCard.querySelector(".product-category").textContent.trim() : "";
+            
+            // Get and parse the price - check for sale price first
+            let price;
+            const currentPriceElement = productCard.querySelector(".current-price");
+            const oldPriceElement = productCard.querySelector(".old-price");
+            
+            if (currentPriceElement) {
+              const priceText = currentPriceElement.textContent.trim();
+              // Remove any currency symbols and commas, then parse to float
+              const rawPrice = parseFloat(priceText.replace(/[^0-9.]/g, ""));
+              
+              if (isNaN(rawPrice)) {
+                console.error("Invalid price extracted from:", priceText);
+                alert("Error: Could not determine product price. Please try again.");
+                return;
+              }
+              
+              // Format price to exactly 2 decimal places as a string
+              price = rawPrice.toFixed(2);
+            } else {
+              console.error("No price element found");
+              alert("Error: Could not find product price. Please try again.");
+              return;
+            }
+            
+            let quantity = 1;
+            const quantityInput = productCard.querySelector(".quantity-input");
+            if (quantityInput) {
+              quantity = parseInt(quantityInput.value) || 1;
+            }
+            
+            const productData = {
+              id: productId,
+              name: productName,
+              price: price, // price is now a string with exactly 2 decimal places
+              image: productImage,
+              specs: productSpecs,
+              quantity: quantity
+            };
+            
+            // Log the product data for debugging
+            console.log("Adding to cart:", productData);
+            
+            if (typeof window.addToCart === "function") {
+              window.addToCart(productData);
+            } else {
+              console.error("Global addToCart function not found");
+              alert("Error adding item to cart. Functionality unavailable.");
+            }
           });
+        });
+
         // Load products function
         function loadProducts(page = 1, filters = {}) {
           const queryParams = new URLSearchParams({
@@ -1558,18 +1591,41 @@
               ? parseInt(quantityInput.value) || 1
               : 1;
 
+            // Determine the correct price (use sale price if available and lower)
+            let price;
+            if (product.sale_price && parseFloat(String(product.sale_price).replace(/[^0-9.]/g, "")) < parseFloat(String(product.regular_price).replace(/[^0-9.]/g, ""))) {
+              price = parseFloat(String(product.sale_price).replace(/[^0-9.]/g, ""));
+            } else {
+              price = parseFloat(String(product.regular_price).replace(/[^0-9.]/g, ""));
+            }
+
+            // Log price for debugging
+            console.log("Product price:", {
+              regular: product.regular_price,
+              sale: product.sale_price,
+              final: price
+            });
+
             // Prepare product data
             const productData = {
               id: product.id,
               name: product.name,
-              price: parseFloat(product.regular_price.replace("$", "")),
+              price: price,
               image: product.images ? product.images[0] : "",
               specs: product.specifications || "",
               quantity: quantity,
             };
 
-            // Add to cart
-            addToCart(productData);
+            // Log product data for debugging
+            console.log("Adding to cart:", productData);
+
+            // Add to cart using the global function from cart.js
+            if (typeof window.addToCart === "function") {
+              window.addToCart(productData);
+            } else {
+              console.error("Global addToCart function not found.");
+              alert("Error adding item to cart. Functionality unavailable.");
+            }
           };
           infoContainer.appendChild(addToCartBtn);
 
@@ -1716,85 +1772,6 @@
         // Initial load
         loadProducts();
       });
-
-      // Add to cart function
-      function addToCart(product) {
-        // Validate product data
-        if (!product.id || !product.name || isNaN(product.price)) {
-          console.error("Invalid product data:", product);
-          return;
-        }
-
-        // Prepare data for API call
-        const formData = new FormData();
-        formData.append("product_id", product.id);
-        formData.append("product_name", product.name);
-        formData.append("price", product.price);
-        formData.append("image_url", product.image || "");
-        formData.append("specs", product.specs || "");
-        formData.append("quantity", product.quantity || 1);
-
-        // Send data to server
-        fetch("add_to_cart.php", {
-          method: "POST",
-          body: formData,
-        })
-          .then((response) => response.json())
-          .then((data) => {
-            if (data.success) {
-              // Update cart count in the header
-              const cartCountElements =
-                document.querySelectorAll(".cart-count");
-              cartCountElements.forEach((element) => {
-                element.textContent = data.cart_count;
-                element.style.display =
-                  data.cart_count > 0 ? "inline-block" : "none";
-              });
-
-              // Show success notification
-              showAddToCartConfirmation(product.name);
-            } else {
-              console.error("Failed to add item to cart:", data.message);
-              alert("Failed to add item to cart. Please try again.");
-            }
-          })
-          .catch((error) => {
-            console.error("Error adding to cart:", error);
-            alert("An error occurred while adding the item to cart.");
-          });
-      }
-
-      // Show add to cart confirmation
-      function showAddToCartConfirmation(productName) {
-        // Create notification element
-        const notification = document.createElement("div");
-        notification.className = "add-to-cart-notification";
-        notification.innerHTML = `
-            <div class="notification-content">
-                <i class="fas fa-check-circle"></i>
-                <p>${productName} has been added to your cart</p>
-                <a href="cart.php" class="view-cart-btn">View Cart</a>
-            </div>
-            <button class="close-notification">&times;</button>
-        `;
-
-        // Add to document
-        document.body.appendChild(notification);
-
-        // Remove after 5 seconds
-        setTimeout(() => {
-          notification.classList.add("fade-out");
-          setTimeout(() => {
-            document.body.removeChild(notification);
-          }, 500);
-        }, 5000);
-
-        // Close button functionality
-        const closeBtn = notification.querySelector(".close-notification");
-        closeBtn.addEventListener("click", () => {
-          document.body.removeChild(notification);
-        });
-      }
     </script>
   </body>
 </html>

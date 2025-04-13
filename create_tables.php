@@ -21,13 +21,10 @@ function createTables($conn) {
         id INT AUTO_INCREMENT PRIMARY KEY,
         first_name VARCHAR(100) NOT NULL,
         last_name VARCHAR(100) NOT NULL,
-        email VARCHAR(100) NOT NULL,
+        email VARCHAR(100) NOT NULL UNIQUE,
         phone VARCHAR(20),
-        address TEXT,
-        city VARCHAR(100),
-        state VARCHAR(100),
-        country VARCHAR(100),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
     if ($conn->query($sql_customers) === TRUE) {
@@ -43,6 +40,7 @@ function createTables($conn) {
         customer_id INT,
         session_id VARCHAR(255),
         order_number VARCHAR(50) NOT NULL,
+        status VARCHAR(50) DEFAULT 'Pending',
         first_name VARCHAR(100),
         last_name VARCHAR(100),
         email VARCHAR(100),
@@ -52,13 +50,12 @@ function createTables($conn) {
         state VARCHAR(100),
         country VARCHAR(100),
         zip_code VARCHAR(20),
-        order_notes TEXT,
-        subtotal DECIMAL(10, 2) NOT NULL,
-        shipping DECIMAL(10, 2) NOT NULL,
-        tax DECIMAL(10, 2) NOT NULL,
-        total DECIMAL(10, 2) NOT NULL,
-        status VARCHAR(50) DEFAULT 'Pending',
         payment_method VARCHAR(50),
+        order_notes TEXT,
+        subtotal DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+        shipping DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+        tax DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+        total DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
