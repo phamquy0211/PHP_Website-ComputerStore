@@ -1,3 +1,8 @@
+<?php
+// Initialize session at the very beginning before any output
+session_start();
+?>
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -648,49 +653,76 @@
           </p>
         </div>
 
+        <?php
+        // Display success message
+        if (isset($_GET['success']) && $_GET['success'] == 1) {
+            echo '<div class="alert alert-success" role="alert" style="max-width: 800px; margin: 0 auto 20px; padding: 15px; border-radius: 5px; background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb;">
+                    <strong>Success!</strong> Your support ticket has been submitted. We\'ll contact you shortly.
+                  </div>';
+            // Clear session variables
+            unset($_SESSION['support_success']);
+        }
+        
+        // Display error messages
+        if (isset($_GET['error']) && $_GET['error'] == 1 && isset($_SESSION['support_errors'])) {
+            echo '<div class="alert alert-danger" role="alert" style="max-width: 800px; margin: 0 auto 20px; padding: 15px; border-radius: 5px; background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;">
+                    <strong>Error!</strong> Please correct the following issues:<br>';
+            foreach ($_SESSION['support_errors'] as $error) {
+                echo '- ' . htmlspecialchars($error) . '<br>';
+            }
+            echo '</div>';
+        }
+        
+        // Get form data from session if available (for repopulating the form after errors)
+        $form_data = isset($_SESSION['form_data']) ? $_SESSION['form_data'] : [];
+        
+        // Clear session variables
+        unset($_SESSION['support_errors'], $_SESSION['form_data']);
+        ?>
+
         <div class="support-form">
-          <form id="support-ticket-form">
+          <form id="support-ticket-form" method="POST" action="process_support.php">
             <div class="form-row">
               <div class="form-group">
                 <label for="name">Full Name</label>
-                <input type="text" id="name" class="form-control" required />
+                <input type="text" id="name" name="name" class="form-control" value="<?php echo htmlspecialchars($form_data['name'] ?? ''); ?>" required />
               </div>
               <div class="form-group">
                 <label for="email">Email Address</label>
-                <input type="email" id="email" class="form-control" required />
+                <input type="email" id="email" name="email" class="form-control" value="<?php echo htmlspecialchars($form_data['email'] ?? ''); ?>" required />
               </div>
             </div>
 
             <div class="form-row">
               <div class="form-group">
                 <label for="order-number">Order Number (if applicable)</label>
-                <input type="text" id="order-number" class="form-control" />
+                <input type="text" id="order-number" name="order_number" class="form-control" value="<?php echo htmlspecialchars($form_data['order_number'] ?? ''); ?>" />
               </div>
               <div class="form-group">
                 <label for="subject">Subject</label>
-                <input type="text" id="subject" class="form-control" required />
+                <input type="text" id="subject" name="subject" class="form-control" value="<?php echo htmlspecialchars($form_data['subject'] ?? ''); ?>" required />
               </div>
             </div>
 
             <div class="form-row">
               <div class="form-group">
                 <label for="category">Support Category</label>
-                <select id="category" class="form-control" required>
+                <select id="category" name="category" class="form-control" required>
                   <option value="">Select a category</option>
-                  <option value="order">Order Status & Shipping</option>
-                  <option value="returns">Returns & Refunds</option>
-                  <option value="product">Product Information</option>
-                  <option value="technical">Technical Support</option>
-                  <option value="account">Account Issues</option>
-                  <option value="other">Other</option>
+                  <option value="order" <?php echo isset($form_data['category']) && $form_data['category'] === 'order' ? 'selected' : ''; ?>>Order Status & Shipping</option>
+                  <option value="returns" <?php echo isset($form_data['category']) && $form_data['category'] === 'returns' ? 'selected' : ''; ?>>Returns & Refunds</option>
+                  <option value="product" <?php echo isset($form_data['category']) && $form_data['category'] === 'product' ? 'selected' : ''; ?>>Product Information</option>
+                  <option value="technical" <?php echo isset($form_data['category']) && $form_data['category'] === 'technical' ? 'selected' : ''; ?>>Technical Support</option>
+                  <option value="account" <?php echo isset($form_data['category']) && $form_data['category'] === 'account' ? 'selected' : ''; ?>>Account Issues</option>
+                  <option value="other" <?php echo isset($form_data['category']) && $form_data['category'] === 'other' ? 'selected' : ''; ?>>Other</option>
                 </select>
               </div>
               <div class="form-group">
                 <label for="priority">Priority</label>
-                <select id="priority" class="form-control" required>
-                  <option value="normal">Normal</option>
-                  <option value="high">High</option>
-                  <option value="urgent">Urgent</option>
+                <select id="priority" name="priority" class="form-control" required>
+                  <option value="normal" <?php echo isset($form_data['priority']) && $form_data['priority'] === 'normal' ? 'selected' : ''; ?>>Normal</option>
+                  <option value="high" <?php echo isset($form_data['priority']) && $form_data['priority'] === 'high' ? 'selected' : ''; ?>>High</option>
+                  <option value="urgent" <?php echo isset($form_data['priority']) && $form_data['priority'] === 'urgent' ? 'selected' : ''; ?>>Urgent</option>
                 </select>
               </div>
             </div>
@@ -699,15 +731,17 @@
               <label for="message">Message</label>
               <textarea
                 id="message"
+                name="message"
                 class="form-control"
                 rows="6"
                 required
-              ></textarea>
+              ><?php echo htmlspecialchars($form_data['message'] ?? ''); ?></textarea>
             </div>
 
             <div class="form-group">
               <label for="file">Attach Files (optional)</label>
               <input type="file" id="file" class="form-control" multiple />
+              <small class="text-muted">File attachments will be available in a future update</small>
             </div>
 
             <button type="submit" class="submit-btn">Submit Ticket</button>

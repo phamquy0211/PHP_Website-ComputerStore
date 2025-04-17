@@ -3,8 +3,18 @@
 require_once 'auth_check.php';
 require_once '../db_connect.php';
 
+
+// Check database connection
+if (!isset($conn) || $conn === null || $conn->connect_error) {
+    die("Database connection failed. Please try again later.");
+}
+
 // Get total user count
 $stmt = $conn->prepare("SELECT COUNT(*) as total_users FROM users WHERE role = 'user'");
+if (!$stmt) {
+    die("Error preparing query: " . $conn->error);
+}
+
 $stmt->execute();
 $result = $stmt->get_result();
 $total_users = $result->fetch_assoc()['total_users'];
@@ -12,13 +22,33 @@ $stmt->close();
 
 // Get total admin count
 $stmt = $conn->prepare("SELECT COUNT(*) as total_admins FROM users WHERE role = 'admin'");
+
+if (!$stmt) {
+    die("Error preparing query: " . $conn->error);
+}
+
 $stmt->execute();
 $result = $stmt->get_result();
 $total_admins = $result->fetch_assoc()['total_admins'];
 $stmt->close();
 
+
+// Get total orders count
+$stmt = $conn->prepare("SELECT COUNT(*) as total_orders FROM orders");
+if (!$stmt) {
+    die("Error preparing query: " . $conn->error);
+}
+$stmt->execute();
+$result = $stmt->get_result();
+$total_orders = $result->fetch_assoc()['total_orders'];
+$stmt->close();
+
 // Get recent users (last 5 registered)
 $stmt = $conn->prepare("SELECT id, fullname, email, created_at FROM users ORDER BY created_at DESC LIMIT 5");
+if (!$stmt) {
+    die("Error preparing query: " . $conn->error);
+}
+
 $stmt->execute();
 $recent_users = $stmt->get_result();
 $stmt->close();
@@ -380,9 +410,15 @@ $stmt->close();
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a href="#" class="nav-link">
+                        <a href="manage_orders.php" class="nav-link">
                             <i class="fas fa-shopping-cart"></i>
                             <span>Orders</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="manage_support.php" class="nav-link">
+                            <i class="fas fa-headset"></i>
+                            <span>Support</span>
                         </a>
                     </li>
                     <li class="nav-item mt-5">
@@ -397,7 +433,6 @@ $stmt->close();
             <!-- Main Content -->
             <div class="col-md-10 main-content">
                 <h2 class="page-title">Admin Dashboard</h2>
-                
                 <div class="stats-row">
                     <div class="stats-card">
                         <div class="card-counter">
@@ -408,7 +443,6 @@ $stmt->close();
                             </div>
                         </div>
                     </div>
-                    
                     <div class="stats-card">
                         <div class="card-counter">
                             <div class="count-numbers"><?php echo $total_admins; ?></div>
@@ -418,7 +452,6 @@ $stmt->close();
                             </div>
                         </div>
                     </div>
-                    
                     <!-- Additional stat cards -->
                     <div class="stats-card">
                         <div class="card-counter">
@@ -429,10 +462,9 @@ $stmt->close();
                             </div>
                         </div>
                     </div>
-                    
                     <div class="stats-card">
                         <div class="card-counter">
-                            <div class="count-numbers">0</div>
+                            <div class="count-numbers"><?php echo $total_orders; ?></div>
                             <div class="count-name">Total Orders</div>
                             <div class="icon-container">
                                 <i class="fas fa-shopping-cart"></i>
@@ -440,7 +472,6 @@ $stmt->close();
                         </div>
                     </div>
                 </div>
-                
                 <div class="row mt-4">
                     <div class="col-md-12">
                         <div class="card">

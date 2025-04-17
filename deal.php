@@ -430,8 +430,8 @@
         <!-- Deal 1 -->
         <div class="deal-card">
           <div class="deal-image">
-            <img
-              src="/img/815b3+qj0wL._AC_SL1500_.jpg"
+            <i
+              src="/img/4070.jp
               alt="RTX 4070 Ti Super"
             />
             <div class="deal-badge">-20%</div>
@@ -460,7 +460,7 @@
         <div class="deal-card">
           <div class="deal-image">
             <img
-              src="/img/81GyQ70aigL._AC_SL1500_.jpg"
+              src="/img/G15.png"
               alt="ASUS ROG Strix G15"
             />
             <div class="deal-badge">-15%</div>
@@ -489,7 +489,7 @@
         <div class="deal-card">
           <div class="deal-image">
             <img
-              src="/img/81JPZdpeH+L._AC_SL1500_.jpg"
+              src="/img/G7.jpg"
               alt="Samsung Odyssey G7"
             />
             <div class="deal-badge">-25%</div>
@@ -519,7 +519,7 @@
         <!-- Deal 4 -->
         <div class="deal-card">
           <div class="deal-image">
-            <img src="/api/placeholder/350/200" alt="Corsair K100 RGB" />
+            <img src="/img/K100.png" alt="Corsair K100 RGB" />
             <div class="deal-badge">-30%</div>
           </div>
           <div class="deal-content">
@@ -547,7 +547,7 @@
         <!-- Deal 5 -->
         <div class="deal-card">
           <div class="deal-image">
-            <img src="/api/placeholder/350/200" alt="WD Black SN850X 2TB" />
+            <img src="/img/WB.jpg" alt="WD Black SN850X 2TB" />
             <div class="deal-badge">-35%</div>
           </div>
           <div class="deal-content">
@@ -573,7 +573,7 @@
         <!-- Deal 6 -->
         <div class="deal-card">
           <div class="deal-image">
-            <img src="/api/placeholder/350/200" alt="Logitech G Pro X" />
+            <img src="/img/ProX.jpg" alt="Logitech G Pro X" />
             <div class="deal-badge">-40%</div>
           </div>
           <div class="deal-content">

@@ -520,9 +520,15 @@ if ($result && $result->num_rows > 0) {
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a href="#" class="nav-link">
+                        <a href="manage_orders.php" class="nav-link">
                             <i class="fas fa-shopping-cart"></i>
                             <span>Orders</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="manage_support.php" class="nav-link">
+                            <i class="fas fa-headset"></i>
+                            <span>Support</span>
                         </a>
                     </li>
                     <li class="nav-item mt-5">

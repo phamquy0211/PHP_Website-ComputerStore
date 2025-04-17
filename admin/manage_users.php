@@ -6,14 +6,21 @@ if (session_status() === PHP_SESSION_NONE) {
 require_once 'auth_check.php';
 require_once '../db_connect.php';
 
+// Check database connection
+if (!isset($conn) || $conn === null || $conn->connect_error) {
+    die("Database connection failed. Please try again later.");
+}
+
 // Handle user role updates if form submitted
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_role'])) {
     $user_id = $_POST['user_id'];
     $new_role = $_POST['role'];
     
     $stmt = $conn->prepare("UPDATE users SET role = ? WHERE id = ?");
+    if (!$stmt) {
+        die("Error preparing query: " . $conn->error);
+    }
     $stmt->bind_param("si", $new_role, $user_id);
-    
     if ($stmt->execute()) {
         $success_message = "User role updated successfully!";
     } else {
@@ -29,6 +36,9 @@ $start = ($page - 1) * $limit;
 
 // Get users with pagination
 $stmt = $conn->prepare("SELECT id, fullname, email, role, created_at FROM users ORDER BY created_at DESC LIMIT ?, ?");
+if (!$stmt) {
+    die("Error preparing query: " . $conn->error);
+}
 $stmt->bind_param("ii", $start, $limit);
 $stmt->execute();
 $users = $stmt->get_result();
@@ -36,6 +46,9 @@ $stmt->close();
 
 // Get total users count for pagination
 $result = $conn->query("SELECT COUNT(*) as total FROM users");
+if (!$result) {
+    die("Error executing query: " . $conn->error);
+}
 $total_users = $result->fetch_assoc()['total'];
 $total_pages = ceil($total_users / $limit);
 ?>
@@ -414,9 +427,15 @@ $total_pages = ceil($total_users / $limit);
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a href="#" class="nav-link">
+                        <a href="manage_orders.php" class="nav-link">
                             <i class="fas fa-shopping-cart"></i>
                             <span>Orders</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="manage_support.php" class="nav-link">
+                            <i class="fas fa-headset"></i>
+                            <span>Support</span>
                         </a>
                     </li>
                     <li class="nav-item mt-5">

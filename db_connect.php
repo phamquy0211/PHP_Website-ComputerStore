@@ -143,6 +143,30 @@ try {
         echo "Cart_items table created or verified\n";
     }
 
+    // Create support_tickets table
+    $sql_support_tickets = "CREATE TABLE IF NOT EXISTS support_tickets (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) NOT NULL,
+        order_number VARCHAR(50),
+        subject VARCHAR(255) NOT NULL,
+        category VARCHAR(50) NOT NULL,
+        priority VARCHAR(20) NOT NULL,
+        message TEXT NOT NULL,
+        admin_notes TEXT,
+        status VARCHAR(50) DEFAULT 'Open',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+
+    if ($conn->query($sql_support_tickets) === FALSE) {
+        throw new Exception("Error creating table 'support_tickets': " . $conn->error);
+    }
+    
+    if (basename($_SERVER['PHP_SELF']) == 'db_connect.php') {
+        echo "Support_tickets table created or verified\n";
+    }
+
     // Show tables if accessed directly
     if (basename($_SERVER['PHP_SELF']) == 'db_connect.php') {
         $result = $conn->query("SHOW TABLES");
